@@ -28,6 +28,8 @@ std::vector<float> tilesLevel;
 std::vector<Point> levDimen;
 vector<int> tempCount; int tempC;
 
+bool flag_generate_missing_tiles = false;
+
 openslide_t * osr;
 
 Mat BGR2RGB(Mat input)
@@ -42,10 +44,8 @@ Mat BGR2RGB(Mat input)
 	merge(channels, output);
 	return output;
 }
-Mat jpegROI(string path, int levelDim, double roiX, double roiY, double roiW, double roiH);
-Mat openSlide_ROI(string path, int levelDim, double roiX, double roiY, double roiW, double roiH);
 
-void saveImage(string path, Mat outImg);
+Mat openSlide_ROI(string path, int levelDim, double roiX, double roiY, double roiW, double roiH);
 
 void assignLabel(int levTiles, vector<int> tilesDir, int sImg, int RLim, int CLim)
 {
@@ -79,7 +79,7 @@ bool generatingTiles(string imgPath,string dirPath, int level, int64_t w, int64_
 	int x, y; 
 	double ds;
 	// Generating Tile  
-	level = level - 1;
+	//level = level - 1;
 	double tileX = 0.0f, tileY = 0.0f; int dirIndex = 0;
 	for (int i = 0; i < tilesLevel.size(); i++)
 	{
@@ -181,6 +181,97 @@ bool generatingTilesForMissingLevels(string imgPath, string dirPath, int level, 
 	return true;
 }
 
+bool writeOverviewImage(string imgPath, string dirPath, int totalLevels)
+{
+	Mat lev0_img = openSlide_ROI(imgPath.c_str(), (double)totalLevels - 1, 0, 0, levDimen[0].x, levDimen[0].y);
+	Mat dst;
+	resize(lev0_img, dst, Size(lev0_img.cols / 4, lev0_img.rows / 4), 0.0, 0.0, 1);
+	imshow("1", dst);
+	waitKey();
+	std::stringstream ss;
+	ss << dirPath << "\\TileGroup0" << "\\0-0-0" << ".jpg";
+	imwrite(ss.str(), dst);
+	return true;
+}
+
+bool writeXMLFile(string dirPath, int xmlWidth, int xmlHeight, int totalTiles)
+{	
+	ofstream myfile;
+	myfile.open(dirPath + "//ImageProperties.xml");
+	stringstream xmlText;
+	xmlText << "<IMAGE_PROPERTIES WIDTH=\" " << xmlWidth << "\" " << "HEIGHT=\"" << xmlHeight << "\" " << "NUMTILES=\"" << totalTiles << "\" " << "NUMIMAGES=\"1\" VERSION=\"1.8\" TILESIZE=\"256\" />";
+	myfile << xmlText.str();
+	myfile.close();
+	return true;
+}
+
+string createTilesDirectories(string imgPath, int totalTiles)
+{
+	std::size_t pos = imgPath.find(".");
+	std::string dirPath = imgPath.substr(0, pos);
+	CreateDirectory(dirPath.c_str(), NULL);
+
+	std::vector<string> dirNames;
+	int totalDir = (int)(ceil((double)totalTiles / 256.0f));
+	for (int i = 0; i<totalDir; i++)
+	{
+		std::stringstream ss;
+		ss << dirPath << "//TileGroup" << i;
+		CreateDirectory((ss.str()).c_str(), NULL);
+	}
+
+	return dirPath;
+}
+
+bool countTilesAtEachResolution(int level, int &xmlWidth, int &xmlHeight, int64_t &w, int64_t &h)
+{
+	double ds;
+	openslide_get_level_dimensions(osr, level, &w, &h);
+	int x, y;
+	x = (int)w;		y = (int)h;
+	xmlWidth = x;	xmlHeight = y;
+	double ds1, ds2;
+	ds1 = round(openslide_get_level_downsample(osr, level));
+	//levDimen.push_back(Point(x, y));
+
+	// Count Tiles on Each Level
+	int tempX, tempY;
+	//level = 0;
+
+	while (x > 256 || y >256)
+	{
+		openslide_get_level_dimensions(osr, level, &w, &h);
+		x = (int)w;		y = (int)h;
+		double c = ceil((double)x / 256.0f);
+		tempX = (int)ceil((double)x / 256.0f);
+		tempY = (int)ceil((double)y / 256.0f);
+		if (x >= 0 && y >= 0)
+		{
+			tilesLevel.push_back(tempX*tempY);
+			levDimen.push_back(Point(x, y));
+			level = level + 1;
+			ds2 = round(openslide_get_level_downsample(osr, level));
+			
+
+			if (flag_generate_missing_tiles ==  true &&  (ds2/ds1 != 2))
+			{
+				x = (int)w/2;		y = (int)h/2;
+				tempX = (int)ceil((double)x / 256.0f);
+				tempY = (int)ceil((double)y / 256.0f);
+				tilesLevel.push_back((tempX*tempY));
+				levDimen.push_back(Point(x, y));
+			}
+			ds1 = ds2;
+		}
+	}
+
+	reverse(tilesLevel.begin(), tilesLevel.end());
+	reverse(levDimen.begin(), levDimen.end());
+	return true;
+}
+
+
+
 
 int main(int argc)
 {		
@@ -206,26 +297,17 @@ int main(int argc)
 		std::cout << "\nBy Assuming the highest avialable resolution is 40X" << endl;
 
 		std::cout << "Would you like to generate the missing tiles? (Y/N)?" <<endl;
-		char response;
+		char response = '\0';
 		cin >> response;
 		cout << endl;
 
 		if (response == 'Y' || response == 'y')
 		{
-
+			flag_generate_missing_tiles = true;
 		}
 		else if (response == 'N' || response == 'n')
 		{
-			std::string levelStr;//"4";
-			std::cout << "Enter Level Index [0-" << totalLevels - 1 << "]" << endl;
-			cin >> levelStr;
-			level = atoi(levelStr.c_str());
-			if (level<0 && level>totalLevels)
-			{
-				cout << "Enter Valid Level Index" << endl;
-				waitKey();
-				return -1;
-			}
+			flag_generate_missing_tiles = false;
 		}
 		else
 		{
@@ -235,13 +317,20 @@ int main(int argc)
 
 		}
 
-
-
 	}
 	else
 	{
-		std::string levelStr;//"4";
-		std::cout << "Enter Level Index [0-" << totalLevels - 1 << "]" << endl;
+		flag_generate_missing_tiles = false;
+	}
+
+
+	//-----------------------------------------------------------------------------------------------------------------------------------------
+	switch (flag_generate_missing_tiles)
+	{
+	case 0:
+	{
+		std::string levelStr;
+		std::cout << "Select Resolution Level [0-" << totalLevels - 1 << "]" << endl;
 		cin >> levelStr;
 		level = atoi(levelStr.c_str());
 		if (level<0 && level>totalLevels)
@@ -250,229 +339,73 @@ int main(int argc)
 			waitKey();
 			return -1;
 		}
+
+		// Count Tiles on Each Resolution Level
+		int xmlWidth; int xmlHeight;
+		int64_t w, h;
+		bool flag_count_tiles = countTilesAtEachResolution(level, xmlWidth, xmlHeight, w, h);
+
+		// Count Total Tiles
+		int totalTiles = 0;
+		totalTiles = std::accumulate(tilesLevel.begin(), tilesLevel.end(), 0) + 1; // +1 for self generated overview image
+
+		// Create Folder with Image Name and Create Tiles Directories
+		string dirPath = createTilesDirectories(imgPath, totalTiles);
+
+		// Write XML file
+		bool flag_write_xml = writeXMLFile(dirPath, xmlWidth, xmlHeight, totalTiles);
+
+		// Low Level Overview image 
+		bool flag_write_ovImg = writeOverviewImage(imgPath, dirPath, totalLevels);
+
+		// Generate Tiles for Specified Resolution Level 
+		bool flag_tiles_gen;
+		flag_tiles_gen = generatingTiles(imgPath, dirPath, level, w, h);
 	}
-
-	
-
-	
-
-	int64_t w, h;
-	openslide_get_level_dimensions(osr, level, &w, &h);
-	int x, y;
-	x = (int)w;		y = (int)h;
-	int xmlWidth = x;  int xmlHeight = y;
-	levDimen.push_back(Point(x, y));
-
-	// Count Tiles on Each Level
-	int tempX, tempY;
-	//level = 0;
-	
-	while (x > 256 || y >256)
+	case 1:
 	{
-		double c = ceil((double)x / 256.0f);
-		tempX = (int)ceil((double)x / 256.0f);
-		tempY = (int)ceil((double)y / 256.0f);
-		if (x >= 0 && y >= 0)
+		std::string levelStr;
+		std::cout << "Select Resolution Level [0-8]" << endl;
+		cin >> levelStr;
+		level = atoi(levelStr.c_str());
+		if (level<0 && level>totalLevels)
 		{
-			tilesLevel.push_back(tempX*tempY);
-		}
-		
-		level = level + 1;
-
-		openslide_get_level_dimensions(osr, level, &w, &h);
-		x = (int)w;		y = (int)h;
-
-		if (x >= 0 && y >= 0)
-		{
-			levDimen.push_back(Point(x, y));
-		}
-		
-	}
-	reverse(tilesLevel.begin(), tilesLevel.end());
-	reverse(levDimen.begin(), levDimen.end());
-
-
-	// Create Folder with image name
-	std::size_t pos = imgPath.find(".");
-	std::string dirPath = imgPath.substr(0, pos);
-	CreateDirectory(dirPath.c_str(), NULL);
-
-	// Count Total Tiles
-	int totalTiles = 0;
-	totalTiles = std::accumulate(tilesLevel.begin(), tilesLevel.end(), 0) + 1; // +1 for self generated overview image
-
-	// Create Tiles Directories
-	std::vector<string> dirNames;
-	int totalDir = (int)(ceil((double)totalTiles / 256.0f));
-	for (int i = 0; i<totalDir; i++)
-	{
-		std::stringstream ss;
-		ss << dirPath << "//TileGroup" << i;
-		CreateDirectory((ss.str()).c_str(), NULL);
-	}
-
-	// Write XML file
-	ofstream myfile;
-	myfile.open(dirPath + "//ImageProperties.xml");
-	stringstream xmlText;
-	xmlText << "<IMAGE_PROPERTIES WIDTH=\" " << xmlWidth << "\" " << "HEIGHT=\"" << xmlHeight << "\" " << "NUMTILES=\"" << totalTiles << "\" " << "NUMIMAGES=\"1\" VERSION=\"1.8\" TILESIZE=\"256\" />";
-	myfile << xmlText.str();
-	myfile.close();
-
-
-	// Level 0 image 
-	Mat lev0_img = openSlide_ROI(imgPath.c_str(), (double)totalLevels-1, 0, 0, levDimen[0].x, levDimen[0].y);
-	Mat dst;
-	resize(lev0_img, dst, Size(lev0_img.cols / 4, lev0_img.rows / 4), 0.0, 0.0, 1);
-	imshow("1", dst);
-	waitKey();
-	std::stringstream ss;
-	ss << dirPath << "\\TileGroup0" << "\\0-0-0" << ".jpg";
-	imwrite(ss.str(), dst);
-
-	bool tiles_gen_flag;
-	tiles_gen_flag  = generatingTiles(imgPath, dirPath, level, w, h);
-
-	tiles_gen_flag = generatingTilesForMissingLevels(imgPath, dirPath, level, w, h);
-
-	
-	
-	
-
-		/*kdu_compressed_source *input = NULL;
-		jp2_family_src jp2_ultimate_src;
-		jp2_source jp2_in;
-
-		input = &jp2_in;
-		//jp2_ultimate_src.open(argv[1]);
-		string imgPath;//"E://Research//Qatar_University//openSlide//images//10972IH-11_A1H&E_1.jp2";
-		std::cout<<"Drag Input Image"<<endl;
-		cin>> imgPath;
-		jp2_ultimate_src.open(imgPath.c_str());
-		if (!jp2_in.open(&jp2_ultimate_src))
-			{     
-				//kdu_error e; e << "Supplied input file, \"" << argv[1] << "\", does "
-			  //"not appear to contain any boxes."; 
-		}
-		jp2_in.read_header();
-
-		kdu_codestream codestream;
-		codestream.create(input);
-
-		///std::string levelStr =  argv[3];
-		std::string levelStr;//"4";
-		std::cout<<"Enter Level Index [0-9]"<<endl;
-		cin>> levelStr;
-		int level = atoi(levelStr.c_str());
-		if (level<0 && level>9)
-		{
-			cout<<"Enter Valid Level Index"<<endl;
+			cout << "Enter Valid Level Index" << endl;
 			waitKey();
 			return -1;
 		}
 
-		codestream.apply_input_restrictions(0,0,
-										  level,0,NULL,
-										  KDU_WANT_OUTPUT_COMPONENTS);
-		kdu_dims dims; codestream.get_dims(0,dims,true);
-		int x =  dims.size.x, y=  dims.size.y;
-		int xmlWidth =  x ;  int xmlHeight =  y;
-		levDimen.push_back(Point(x, y));
+		// Count Tiles on Each Resolution Level
+		int xmlWidth; int xmlHeight;
+		int64_t w, h;
+		bool flag_count_tiles = countTilesAtEachResolution(level, xmlWidth, xmlHeight, w, h);
 
-		// Count Tiles on Each Level
-		int tempX, tempY;
-		while (x > 256 || y >256)
-		{
-			double c =  ceil((double)x/256.0f);
-			tempX = (int)ceil((double)x/256.0f);
-			tempY = (int)ceil((double)y/256.0f);
-			tilesLevel.push_back(tempX*tempY);
-			level = level + 1;
-			codestream.apply_input_restrictions(0,0,
-										  level,0,NULL,
-										  KDU_WANT_OUTPUT_COMPONENTS);
-			codestream.get_dims(0,dims,true);
-			x = dims.size.x; y = dims.size.y;
-			levDimen.push_back(Point(x, y));
-		}
-		tilesLevel.push_back(1);
-		reverse(tilesLevel.begin(),tilesLevel.end()); 
-		reverse(levDimen.begin(), levDimen.end());
-
-		// Create Folder with image name
-		std::size_t pos = imgPath.find(".jp2");
-		std::string dirPath = imgPath.substr (0, pos);  
-		CreateDirectory(dirPath.c_str(), NULL);
+		// add remaining tiles
 
 		// Count Total Tiles
-		int totalTiles=0;
-		totalTiles =std::accumulate(tilesLevel.begin(),tilesLevel.end(),0);
+		int totalTiles = 0;
+		totalTiles = std::accumulate(tilesLevel.begin(), tilesLevel.end(), 0) + 1; // +1 for self generated overview image
 
-		// Create Tiles Directories
-		std::vector<string> dirNames;
-		int totalDir =  (int) (ceil((double)totalTiles/256.0f));
-		for (int i=0; i<totalDir; i++)
-		{
-				 std::stringstream ss;
-				 ss << dirPath << "//TileGroup" << i;
-				 CreateDirectory((ss.str()).c_str(), NULL);
-		}
+		// Create Folder with Image Name and Create Tiles Directories
+		string dirPath = createTilesDirectories(imgPath, totalTiles);
 
-		// Write XML file
-		ofstream myfile;
-		myfile.open (dirPath + "//ImageProperties.xml");
-		stringstream xmlText;
-		xmlText<<"<IMAGE_PROPERTIES WIDTH=\" " << xmlWidth <<"\" "<<"HEIGHT=\""<<xmlHeight<<"\" "<<"NUMTILES=\""<<totalTiles<<"\" "<<"NUMIMAGES=\"1\" VERSION=\"1.8\" TILESIZE=\"256\" />";
-		myfile << xmlText.str();
-		myfile.close();
+		// Low Level Overview image 
+		bool flag_write_ovImg = writeOverviewImage(imgPath, dirPath, totalLevels);
 
+	}
+	default:
+		break;
+	}
+	
+	//flag_tiles_gen = generatingTilesForMissingLevels(imgPath, dirPath, level, w, h);
 
-		double tileX= 0.0f, tileY=0.0f; int dirIndex=0;
-		for (int i=0; i<tilesLevel.size(); i++)
-		{
-			saveImgLev =  i;
-			codestream.apply_input_restrictions(0,0,
-										  level,0,NULL,
-										  KDU_WANT_OUTPUT_COMPONENTS);
-			codestream.get_dims(0,dims,true);
-			x = dims.size.x; y = dims.size.y;
-
-			for (int j =0; j<(int)ceil((double)y/256.0f); j++)
-			{
-				saveImgRow = j;
-				for (int k=0; k<(int)ceil((double)x/256.0f); k++)
-				{
-					saveImgCol = k;
-					Mat roiImg = jpegROI(imgPath, level , tileX, tileY, 256.0f, 256.0f);
-					tileX = 1.0f - (((double)x - (256.0f*((double)k+1.0f)))/(double)x);	
-					if (tileX >= 1)
-						tileX =0;
-					//saveImage(dirPath, roiImg);
-
-					std::stringstream ss;
-					ss << dirPath << "//TileGroup" << dirIndex << "//" << saveImgLev<<"-"<<saveImgCol<<"-"<<saveImgRow<<".jpg";
-					imwrite(ss.str(),roiImg); 
-					saveImgCounter = saveImgCounter +1;
-					if (saveImgCounter%256 ==0)
-						dirIndex = dirIndex +1;
-
-
-				}
-				
-				tileY = 1.0f - (((double)y - (256.0f*((double)j+1.0f)))/(double)y);
-				tileX=0.0f;
-			}
-			level =  level -1;
-			tileX= 0.0f; tileY=0.0f;
-		}
-				
-		
-		*/
+	
+	system("pause");
 
 	return 0;
 }
 
-
+ 
 Mat openSlide_ROI(string path, int levelDim, double roiX, double roiY, double roiW, double roiH)
 {
 	Mat roiImg;
@@ -545,118 +478,6 @@ Mat openSlide_ROI(string path, int levelDim, double roiX, double roiY, double ro
 	//imshow("win", roiImg);
 	//waitKey();
 	return roiImg;
-}
-
-void saveImage(string path, Mat outImg)
-{
-	if (tilesLevel[saveImgLev] + saveImgCounter < 256)
-	{
-		std::stringstream ss;
-		ss << path << "//TileGroup" << saveImgCounter/256 << "//" << saveImgLev<<"-"<<saveImgCol<<"-"<<saveImgRow<<".jpg";
-		imwrite(ss.str(), outImg);
-		saveImgCounter = saveImgCounter + 1;
-		currLev = saveImgLev;
-
-	}
-	else
-	{
-		if (currLev ==  saveImgLev )
-		{
-			std::stringstream ss, ss1;
-			for (int i=0; i<limit.size(); i++)
-			{
-				if (saveImgRow < limit[i])
-				{
-					if (saveImgLev == 7 &&  saveImgRow ==  78)
-						int a=1;
-					ss << path << "//TileGroup" << tiles[i] << "//" << saveImgLev<<"-"<<saveImgCol<<"-"<<saveImgRow<<".jpg";
-					imwrite(ss.str(), outImg);
-					saveImgCounter = saveImgCounter + 1;
-					if (i>0)
-					{
-						ss1 << path << "//TileGroup" << tiles[i-1] << "//" << saveImgLev<<"-"<<saveImgCol<<"-"<<saveImgRow<<".jpg";
-						imwrite(ss1.str(), outImg);
-					}
-					break;
-				}
-				/*else if (rewards[i] > 0 && tempCount[i] < rewards[i])
-				{
-					if (rewardCount == tempC-1)
-						rewardCount = 0;
-					else if (saveImgCol ==  rewardCount)
-					{
-						ss << path << "//TileGroup" << tiles[i] << "//" << saveImgLev<<"-"<<saveImgCol<<"-"<<saveImgRow<<".jpg";
-						imwrite(ss.str(), outImg);
-						saveImgCounter = saveImgCounter + 1;
-						rewardCount =  rewardCount +1;
-						tempCount[i] =  tempCount[i]+1;
-						break;
-					}
-				}*/
-			
-			}
-
-
-
-		}
-		else
-		{
-			limit.clear();
-			tiles.clear();
-			rewards.clear();
-			rewardCount = 0;tempCount.clear();
-			currLev = saveImgLev;
-			int diff =  256- (saveImgCounter%256);
-			int levTiles = tilesLevel[saveImgLev] ;
-			Point tempPt =  levDimen[saveImgLev];
-			tempC =  ceil((double)tempPt.x/256.0f); int tempR =  ceil((double)tempPt.y/256.0f);
-			tileLim  = diff/tempC; 
-			tileRew = diff%tempC;
-			int tileGr =saveImgCounter/256 ;
-			int tileLimT=tileLim;
-
-			while(levTiles > 0 )
-			{
-				tileGr = tileGr +1;
-				rewards.push_back(tileRew);
-				limit.push_back(tileLim);
-				tiles.push_back(tileGr);
-				tempCount.push_back(0);
-				levTiles = levTiles-  tileLimT*tempC;
-				//levTiles = levTiles-  256;
-				if (levTiles > 256)
-				{
-					tileLim =  256 /tempC +  tileLim;
-					tileLimT = 256 /tempC ;
-				}
-				else
-				{tileLim =  levTiles / tempC + tileLim;tileLimT = 256 /tempC ;}
-				tileRew =  256 - tileLimT*tempC;
-
-			}
-
-			int sumTiles = 0;
-			tiles.clear();
-			for (int i=0; i<currLev; i++)
-			{
-				sumTiles =  sumTiles + tilesLevel[i];
-			}
-			int maxL =  sumTiles +  tilesLevel[currLev];
-			maxL =  ceil((double)maxL / 256.0f);
-			int minL = sumTiles / 256;
-			for (int i=minL; i<maxL; i++)
-				tiles.push_back(i);
-
-			rewards.at(rewards.size()-1) =0;
-			std::stringstream ss;
-			ss << path << "//TileGroup" << saveImgCounter/256 << "//" << saveImgLev<<"-"<<saveImgCol<<"-"<<saveImgRow<<".jpg";
-			imwrite(ss.str(), outImg);
-			saveImgCounter = saveImgCounter + 1;
-		}
-
-	}
-
-
 }
 
 
