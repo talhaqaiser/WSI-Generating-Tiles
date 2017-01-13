@@ -192,7 +192,7 @@ bool writeOverviewImage(string imgPath, string dirPath, int totalLevels)
 	ss << dirPath << "\\TileGroup0" << "\\0-0-0" << ".jpg";
 	imwrite(ss.str(), dst);
 	return true;
-}
+} 
 
 bool writeXMLFile(string dirPath, int xmlWidth, int xmlHeight, int totalTiles)
 {	

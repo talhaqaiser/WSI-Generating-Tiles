@@ -6,4 +6,4 @@
 extern "C" 
 			{
 	 __declspec(dllexport)  int main(int argc);
-} 
+}  
