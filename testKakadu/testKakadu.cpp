@@ -26,7 +26,9 @@ int currLev = 0; int tileLim; int tileRew; int rewardCount =0;
 vector<int> limit; vector<int> tiles; vector<int> rewards;
 std::vector<float> tilesLevel;
 std::vector<Point> levDimen;
+std::vector<int> flag_wsiLevel;
 vector<int> tempCount; int tempC;
+int dirIndex = 0;
 
 bool flag_generate_missing_tiles = false;
 
@@ -74,13 +76,39 @@ void assignLabel(int levTiles, vector<int> tilesDir, int sImg, int RLim, int CLi
 
 }
 
+Mat removeBlackRegion(Mat roiImg, int i, int j, int k)
+{
+	// j is y
+	// k is x
+	j = j + 1;
+	k = k + 1;
+
+	if (levDimen[i].x < 256 || levDimen[i].y < 256)
+		roiImg = roiImg(cv::Rect(0, 0, levDimen[i].x, levDimen[i].y));
+
+	int mod_w = 256, mod_h = 256;
+	if (j * 256 > levDimen[i].y)
+		mod_h = levDimen[i].y - (j - 1) * 256;
+
+	if (k * 256 > levDimen[i].x)
+		mod_w = levDimen[i].x - (k - 1) * 256;
+
+	if (mod_h != 256 || mod_w != 256)
+		roiImg = roiImg(cv::Rect(0, 0, mod_w, mod_h));
+
+
+
+
+	return roiImg;
+}
+
 bool generatingTiles(string imgPath,string dirPath, int level, int64_t w, int64_t h)
 {
 	int x, y; 
 	double ds;
 	// Generating Tile  
 	//level = level - 1;
-	double tileX = 0.0f, tileY = 0.0f; int dirIndex = 0;
+	double tileX = 0.0f, tileY = 0.0f; 
 	for (int i = 0; i < tilesLevel.size(); i++)
 	{
 		saveImgLev = i + 1;
@@ -106,6 +134,7 @@ bool generatingTiles(string imgPath,string dirPath, int level, int64_t w, int64_
 				/*imshow("1", roiImg);
 				waitKey();*/
 
+				roiImg = removeBlackRegion(roiImg, i, j, k);
 
 				std::stringstream ss;
 				ss << dirPath << "\\TileGroup" << dirIndex << "\\" << saveImgLev << "-" << saveImgCol << "-" << saveImgRow << ".jpg";
@@ -127,65 +156,13 @@ bool generatingTiles(string imgPath,string dirPath, int level, int64_t w, int64_
 	return true; // add a scheck on save tile status 
 }
 
-bool generatingTilesForMissingLevels(string imgPath, string dirPath, int level, int64_t w, int64_t h)
-{
-	double tileW = 512.0f;
-	double tileH = 512.0f;
-	int x, y;
-	double ds;
-	// Generating Tile  
-	level = level - 1;
-	double tileX = 0.0f, tileY = 0.0f; int dirIndex = 0;
-	for (int i = 0; i < tilesLevel.size(); i++)
-	{
-		saveImgLev = i + 1;
-		openslide_get_level_dimensions(osr, level, &w, &h);
-		x = (int)w;		y = (int)h;
-
-		for (int j = 0; j < (int)ceil((double)y / tileW); j++)
-		{
-			saveImgRow = j;
-			for (int k = 0; k < (int)ceil((double)x / tileH); k++)
-			{
-				saveImgCol = k;
-				ds = openslide_get_level_downsample(osr, level);
-				Mat roiImg = openSlide_ROI(imgPath.c_str(), level, tileX, tileY, tileW, tileH);
-
-				tileX = 1.0f - (((double)x - (tileW*((double)k + 1.0f))) / (double)x);
-				tileX = (tileX *  (double)x)*ds;
-
-				if (tileX >= x*ds)
-					tileX = 0;
-				//saveImage(dirPath, roiImg);
-
-				/*imshow("1", roiImg);
-				waitKey();*/
-
-
-				std::stringstream ss;
-				ss << dirPath << "\\TileGroup" << dirIndex << "\\" << saveImgLev << "-" << saveImgCol << "-" << saveImgRow << ".jpg";
-				imwrite(ss.str(), roiImg);
-				saveImgCounter = saveImgCounter + 1;
-				if (saveImgCounter % 256 == 0)
-					dirIndex = dirIndex + 1;
-			}
-
-			tileY = 1.0f - (((double)y - (tileH*((double)j + 1.0f))) / (double)y);
-			tileY = (tileY *  (double)y)*ds;
-			tileX = 0.0f;
-		}
-
-		level = level - 1;
-		tileX = 0.0f; tileY = 0.0f;
-	}
-	return true;
-}
-
 bool writeOverviewImage(string imgPath, string dirPath, int totalLevels)
 {
-	Mat lev0_img = openSlide_ROI(imgPath.c_str(), (double)totalLevels - 1, 0, 0, levDimen[0].x, levDimen[0].y);
+	int64_t w, h;
+	openslide_get_level_dimensions(osr, totalLevels, &w, &h);
+	Mat lev0_img = openSlide_ROI(imgPath.c_str(), (double)totalLevels, 0, 0, w, h);
 	Mat dst;
-	resize(lev0_img, dst, Size(lev0_img.cols / 4, lev0_img.rows / 4), 0.0, 0.0, 1);
+	resize(lev0_img, dst, Size(levDimen[0].x/2, levDimen[0].y/2), 0.0, 0.0, 1);
 	imshow("1", dst);
 	waitKey();
 	std::stringstream ss;
@@ -249,6 +226,7 @@ bool countTilesAtEachResolution(int level, int &xmlWidth, int &xmlHeight, int64_
 		{
 			tilesLevel.push_back(tempX*tempY);
 			levDimen.push_back(Point(x, y));
+			flag_wsiLevel.push_back(1);
 			level = level + 1;
 			ds2 = round(openslide_get_level_downsample(osr, level));
 			
@@ -260,17 +238,206 @@ bool countTilesAtEachResolution(int level, int &xmlWidth, int &xmlHeight, int64_
 				tempY = (int)ceil((double)y / 256.0f);
 				tilesLevel.push_back((tempX*tempY));
 				levDimen.push_back(Point(x, y));
+				flag_wsiLevel.push_back(2);
 			}
 			ds1 = ds2;
 		}
 	}
-
-	reverse(tilesLevel.begin(), tilesLevel.end());
-	reverse(levDimen.begin(), levDimen.end());
 	return true;
 }
 
+bool addRemainingLevels()
+{
+	int tempX, tempY;
+	while (levDimen.size() < 9 && levDimen.back().x > 256 && levDimen.back().y > 256)
+	{
+		levDimen.push_back(levDimen.back()/2);
+		tempX = (int)ceil((double)levDimen.back().x / 256.0f);
+		tempY = (int)ceil((double)levDimen.back().y / 256.0f);
+		tilesLevel.push_back((tempX*tempY));
+		flag_wsiLevel.push_back(3);
+	}
+	return true;
+}
 
+Mat getTile(string path, int level, double tileX, double tileY, double tileW, double tileH)
+{
+	Mat tile;
+	
+	int64_t w, h;
+	//openslide_get_level_dimensions(osr, 9, &w, &h);
+	if (flag_wsiLevel[level] == 2)
+	{
+		Mat roiImg = openSlide_ROI(path, level, tileX, tileY, tileW, tileH);
+		
+	}
+	else
+	{
+		Mat roiImg = openSlide_ROI(path, level, tileX, tileY, tileW, tileH);
+	}
+
+
+	return tile;
+}
+
+bool generateLowResolutionTiles(string imgPath, string dirPath, int total_lev)
+{
+	int64_t w, h;
+	int level = 0, x, y;
+	double tileX = 0.0f, tileY = 0.0f, tileW = 256.0f, tileH =  256.0f;
+	openslide_get_level_dimensions(osr, total_lev, &w, &h);
+	Mat wsiImg = openSlide_ROI(imgPath.c_str(), (double)total_lev, 0, 0, w, h);
+	while (flag_wsiLevel[level] == 3)
+	{
+		Mat dst;
+		resize(wsiImg, dst, Size(levDimen[level].x, levDimen[level].y), 0.0, 0.0, 1);
+
+		//for (int i = 0; i < tilesLevel.size(); i++)
+			saveImgLev = level + 1;
+			x = levDimen[level].x;		y = levDimen[level].y;
+			if (x < tileW)
+				tileW = x;
+			if (y < tileH)
+				tileH = y;
+
+
+			for (int j = 0; j < (int)ceil((double)y / 256.0f); j++)
+			{
+				saveImgRow = j;
+				for (int k = 0; k < (int)ceil((double)x / 256.0f); k++)
+				{
+ 					saveImgCol = k;
+					Mat roiImg = dst(Rect(tileX, tileY, tileW, tileH));
+					tileX = 1.0f - (((double)x - (256.0f*((double)k + 1.0f))) / (double)x);
+					tileX = (tileX *  (double)x);
+
+					if (tileX >= x)
+						tileX = 0;
+
+					if (tileW + tileX > dst.cols)
+						tileW = dst.cols - tileX;
+
+					std::stringstream ss;
+					ss << dirPath << "\\TileGroup" << dirIndex << "\\" << saveImgLev << "-" << saveImgCol << "-" << saveImgRow << ".jpg";
+					imwrite(ss.str(), roiImg);
+					saveImgCounter = saveImgCounter + 1;
+					if (saveImgCounter % 256 == 0)
+						dirIndex = dirIndex + 1;
+
+				}
+				tileY = 1.0f - (((double)y - (256.0f*((double)j + 1.0f))) / (double)y);
+				tileY = (tileY *  (double)y);
+
+				tileW = 256.0f;
+				if (tileH + tileY > dst.rows)
+					tileH = dst.rows - tileY;
+
+				tileX = 0.0f;
+			}
+		tileX = 0.0f; tileY = 0.0f;
+		tileW = 256.0f; tileH = 256.0f;
+		level = level + 1;
+		
+	}
+	
+	return true;
+}
+
+bool generateHighResolutionTiles(string imgPath, string dirPath, int level, int64_t w, int64_t h)
+{
+	double tileW = 256.0f;
+	double tileH = 256.0f;
+	int x, y;
+	double ds;
+	// Generating Tile  
+	double tileX = 0.0f, tileY = 0.0f;
+	for (int i = 0; i < tilesLevel.size(); i++)
+	{
+		if (flag_wsiLevel[i] == 1)
+		{
+			saveImgLev = i + 1;
+			tileW = 256.0f;
+			tileH = 256.0f;
+			//openslide_get_level_dimensions(osr, level, &w, &h);
+			x = levDimen[i].x;		y = levDimen[i].y;
+
+			for (int j = 0; j < (int)ceil((double)y / tileW); j++)
+			{
+				saveImgRow = j;
+				for (int k = 0; k < (int)ceil((double)x / tileH); k++)
+				{
+					saveImgCol = k;
+					ds = openslide_get_level_downsample(osr, level);
+					Mat roiImg = openSlide_ROI(imgPath.c_str(), level, tileX, tileY, tileW, tileH);
+					//Mat roiImg = getTile(imgPath, i, tileX, tileY, tileW, tileH);
+
+					tileX = 1.0f - (((double)x - (tileW*((double)k + 1.0f))) / (double)x);
+					tileX = (tileX *  (double)x)*ds;
+
+					if (tileX >= x*ds)
+						tileX = 0;
+
+					std::stringstream ss;
+					ss << dirPath << "\\TileGroup" << dirIndex << "\\" << saveImgLev << "-" << saveImgCol << "-" << saveImgRow << ".jpg";
+					imwrite(ss.str(), roiImg);
+					saveImgCounter = saveImgCounter + 1;
+					if (saveImgCounter % 256 == 0)
+						dirIndex = dirIndex + 1;
+				}
+
+				tileY = 1.0f - (((double)y - (tileH*((double)j + 1.0f))) / (double)y);
+				tileY = (tileY *  (double)y)*ds;
+				tileX = 0.0f;
+			}
+
+			level = level - 1;
+			tileX = 0.0f; tileY = 0.0f;
+		}
+		else if (flag_wsiLevel[i] == 2)
+		{
+			saveImgLev = i + 1;
+			//openslide_get_level_dimensions(osr, level, &w, &h);
+			x = levDimen[i+1].x;		y = levDimen[i+1].y;
+			tileW = 512.0f;
+			tileH = 512.0f;
+
+			for (int j = 0; j < (int)ceil((double)y / tileW); j++)
+			{
+				saveImgRow = j;
+				for (int k = 0; k < (int)ceil((double)x / tileH); k++)
+				{
+					saveImgCol = k;
+					ds = openslide_get_level_downsample(osr, level);
+					Mat roiImg = openSlide_ROI(imgPath.c_str(), level, tileX, tileY, 512.0f, 512.0f);
+					Mat dst;
+					resize(roiImg, dst, Size(256, 256), 0.0, 0.0, 1);
+					//Mat roiImg = getTile(imgPath, i, tileX, tileY, tileW, tileH);
+
+					tileX = 1.0f - (((double)x - (tileW*((double)k + 1.0f))) / (double)x);
+					tileX = (tileX *  (double)x)*ds;
+
+					if (tileX >= x*ds)
+						tileX = 0;
+
+					std::stringstream ss;
+					ss << dirPath << "\\TileGroup" << dirIndex << "\\" << saveImgLev << "-" << saveImgCol << "-" << saveImgRow << ".jpg";
+					imwrite(ss.str(), dst);
+					saveImgCounter = saveImgCounter + 1;
+					if (saveImgCounter % 256 == 0)
+						dirIndex = dirIndex + 1;
+				}
+
+				tileY = 1.0f - (((double)y - (tileH*((double)j + 1.0f))) / (double)y);
+				tileY = (tileY *  (double)y)*ds;
+				tileX = 0.0f;
+			}
+
+			//level = level - 1;
+			tileX = 0.0f; tileY = 0.0f;
+		}
+	}
+	return true;
+}
 
 
 int main(int argc)
@@ -345,6 +512,9 @@ int main(int argc)
 		int64_t w, h;
 		bool flag_count_tiles = countTilesAtEachResolution(level, xmlWidth, xmlHeight, w, h);
 
+		reverse(tilesLevel.begin(), tilesLevel.end());
+		reverse(levDimen.begin(), levDimen.end());
+
 		// Count Total Tiles
 		int totalTiles = 0;
 		totalTiles = std::accumulate(tilesLevel.begin(), tilesLevel.end(), 0) + 1; // +1 for self generated overview image
@@ -356,11 +526,12 @@ int main(int argc)
 		bool flag_write_xml = writeXMLFile(dirPath, xmlWidth, xmlHeight, totalTiles);
 
 		// Low Level Overview image 
-		bool flag_write_ovImg = writeOverviewImage(imgPath, dirPath, totalLevels);
+		bool flag_write_ovImg = writeOverviewImage(imgPath, dirPath, totalLevels-1);
 
 		// Generate Tiles for Specified Resolution Level 
 		bool flag_tiles_gen;
-		flag_tiles_gen = generatingTiles(imgPath, dirPath, level, w, h);
+		flag_tiles_gen = generatingTiles(imgPath, dirPath, totalLevels-3, w, h);
+		break;
 	}
 	case 1:
 	{
@@ -380,7 +551,18 @@ int main(int argc)
 		int64_t w, h;
 		bool flag_count_tiles = countTilesAtEachResolution(level, xmlWidth, xmlHeight, w, h);
 
-		// add remaining tiles
+		// add remaining resolution levels
+		bool flag_complete_res = addRemainingLevels();
+		// Quick hack need to fix later
+		/*tilesLevel.erase(tilesLevel.begin());
+		levDimen.erase(levDimen.begin());
+		flag_wsiLevel.erase(flag_wsiLevel.begin());
+		xmlHeight = levDimen[level].y;
+		xmlWidth = levDimen[level].x;*/
+
+		reverse(tilesLevel.begin(), tilesLevel.end());
+		reverse(levDimen.begin(), levDimen.end());
+		reverse(flag_wsiLevel.begin(), flag_wsiLevel.end());
 
 		// Count Total Tiles
 		int totalTiles = 0;
@@ -390,8 +572,17 @@ int main(int argc)
 		string dirPath = createTilesDirectories(imgPath, totalTiles);
 
 		// Low Level Overview image 
-		bool flag_write_ovImg = writeOverviewImage(imgPath, dirPath, totalLevels);
+		bool flag_writeOvImg = writeOverviewImage(imgPath, dirPath, totalLevels-1);
 
+		// Write XML file
+		bool flag_write_xml = writeXMLFile(dirPath, xmlWidth, xmlHeight, totalTiles);
+
+		// Generate Tiles for Low Resolution Levels
+		bool flag_genLowResTiles = generateLowResolutionTiles(imgPath, dirPath, totalLevels-1);
+
+		// Generate Tiles for High Resolution Levels
+		bool flag_genHighResTiles = generateHighResolutionTiles(imgPath, dirPath, totalLevels - 1, w, h);
+		break;
 	}
 	default:
 		break;
@@ -427,7 +618,6 @@ Mat openSlide_ROI(string path, int levelDim, double roiX, double roiY, double ro
 
 		// un-premultiply alpha and pack into expected format
 		for (int i = 0; i < roiW; i++) {
-			colInd = colInd + 1;
 			uint32_t p = dest[i];
 			uint8_t *p8 = (uint8_t *)(dest + i);
 
@@ -460,6 +650,7 @@ Mat openSlide_ROI(string path, int levelDim, double roiX, double roiY, double ro
 			roiImg.data[roiImg.channels()*(roiImg.cols*rowInd + colInd) + 0] = b;
 			roiImg.data[roiImg.channels()*(roiImg.cols*rowInd + colInd) + 1] = g;
 			roiImg.data[roiImg.channels()*(roiImg.cols*rowInd + colInd) + 2] = r;
+			colInd = colInd + 1;
 
 		}
 		colInd = 0;
